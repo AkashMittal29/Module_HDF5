@@ -161,7 +161,7 @@ PROGRAM main
     ! Creation of datasets; This should be called once before writing the data.
     ! data 0: /grid/x, /grid/y (both share same dataspace)
     CALL griddata%create(global_array_size=(/nxg, nyg/), data_address='field.h5/grid', dataset_names=['x','y'], &
-                       & restart=restart, restart_ind=1_INT64,                                                        &
+                       & restart=restart, restart_ind=1_INT64,                                                  &
                        & slab_start_ind=(/1+nx*mpi_coord(2), 1+ny*mpi_coord(1)/),                               &
                        & slab_end_ind=(/nx*(1+mpi_coord(2)), ny*(1+mpi_coord(1))/) )
     
@@ -233,5 +233,6 @@ PROGRAM main
     CALL MPI_FINALIZE(mpierr)
 
 END PROGRAM MAIN
+
 
 
