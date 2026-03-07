@@ -41,15 +41,16 @@ MODULE mod_h5_utility
     
     !###########################################################
     ! Defining derived datatype
-    ! Object with this type can have many datasets under a common file, space, group, plist, and memory space.
-    ! Another object will be required if a dataset uses another data space. However, file_id is automatically 
-    ! copied if it is created under the same file to avoid opening multiple file handles.
+    ! Object with this type can have many datasets under a common file, file space, memory space, group, and plist.
+    ! Another object will be required if a dataset uses another file data space or memory space (input variable's size and its hyperslab). 
+    ! However, file_id is automatically copied if it is created under the same file to avoid opening multiple file handles.
     TYPE h5_dataset_type
         !###########################################################
         ! Declaring variables
         INTEGER(kind=hid_t) :: file_id=-1, space_id=-1, group_id=-1, plist_id=-1, memspace_id=-1, transfer_plist_id=-1 ! Common for each dataset
         INTEGER(kind=hid_t),     DIMENSION(:), ALLOCATABLE :: dataset_id ! To have multiple datasets
-        INTEGER(kind = HSIZE_T), DIMENSION(:), ALLOCATABLE :: dims_current, dims_total, dims_max, dims_chunk, start, count, dims_mem
+        INTEGER(kind = HSIZE_T), DIMENSION(:), ALLOCATABLE :: dims_current, dims_total, dims_max, dims_chunk, &
+                                                            & start, count, dims_mem, mem_start, mem_count
         CHARACTER(LEN=:),                      ALLOCATABLE :: file_name
         INTEGER           :: n_dim_full, error, n_extend, extension_track
         INTEGER(KIND=8)   :: rest_index
@@ -98,9 +99,9 @@ MODULE mod_h5_utility
         !###########################################################
         SUBROUTINE create(self, global_array_size, data_address, dataset_names, &
                         & restart, restart_step_value, restart_step_data_address, restart_ind, &
-                        & data_type, slab_start_ind, slab_end_ind, mpi_comm)
+                        & data_type, slab_start_ind, slab_end_ind, mpi_comm, mem_size, mem_start)
             CLASS(h5_dataset_type), INTENT(INOUT)            :: self
-            INTEGER(kind=HSIZE_T),  INTENT(IN), DIMENSION(:) :: global_array_size
+            INTEGER(kind=HSIZE_T),  INTENT(IN), DIMENSION(:) :: global_array_size ! kind=HSIZE_T (INT64) to accommodate large integers for global_array_size
             CHARACTER(LEN=*),       INTENT(IN)               :: data_address
             CHARACTER(LEN=*),       INTENT(IN), DIMENSION(:) :: dataset_names ! the LEN of each string will be that of the longest string. Therefore use TRIM(ADJUSTL()).
             INTEGER,                INTENT(IN)               :: restart
@@ -110,6 +111,8 @@ MODULE mod_h5_utility
             INTEGER(KIND=8),        INTENT(IN), OPTIONAL     :: restart_ind
             INTEGER, DIMENSION(:),  INTENT(IN), OPTIONAL     :: slab_start_ind, slab_end_ind ! global start index is 1. However, HDF5 uses zero-based indexing, which is taken care in this module.
             INTEGER,                INTENT(IN), OPTIONAL     :: mpi_comm ! MPI communicator   
+            INTEGER, DIMENSION(:),  INTENT(IN), OPTIONAL     :: mem_size, mem_start ! To define memory space for the input variable in h5 write command if its size is different from the size of data to be 
+                                                                                    ! written into the file hyperslab. Accordingly, memory hyperslab's start index is to be set.
             
             CHARACTER(LEN=:), DIMENSION(:), ALLOCATABLE :: address_parts
             INTEGER,          DIMENSION(:), ALLOCATABLE :: slabstart, slabend
@@ -189,8 +192,10 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                                 & self%start(1+n_dim),        &
                                 & self%count(1+n_dim),        &
                                 & self%dims_mem(n_dim),       &
+                                & self%mem_start(n_dim),      &
+                                & self%mem_count(n_dim),      &
                                 & slabstart(n_dim),           &
-                                & slabend(n_dim)              &
+                                & slabend(n_dim)              & 
                                 & ) ! +1 for iteration
 
             ! Assigning dimensions
@@ -209,14 +214,22 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             
             DO i=1,n_dim
                 ! (Note: for each processor, every local object in a processor is disctinct from the object created in other processor.)
-                self%dims_current(i) = global_array_size(i)
-                self%dims_max(i)     = global_array_size(i)
-                self%start(i)        = slabstart(i)-1 ! Used for hyperslab; HDF5 uses zero-based indexing. start(n_dim+1) will be assigned later.
-                self%count(i)        = slabend(i)-slabstart(i)+1
-                self%dims_chunk(i)   = self%count(i)
-                self%dims_mem(i)     = self%count(i)       ! memory space used to write dataset with a hyperslab.
+                self%dims_current(i)  = global_array_size(i)
+                self%dims_max(i)      = global_array_size(i)
+                self%start(i)         = slabstart(i)-1      ! Used for file hyperslab; HDF5 uses zero-based indexing. start(n_dim+1) will be assigned later.
+                self%count(i)         = slabend(i)-slabstart(i)+1
+                self%dims_chunk(i)    = self%count(i)
+                self%mem_count(i)     = self%count(i) ! Should be equal to self%count(i) element-wise.
+                IF(PRESENT(mem_size) .AND. PRESENT(mem_start)) THEN
+                    self%dims_mem(i)  = mem_size(i)      ! memory space is used to write dataset with a memory hyperslab.
+                    self%mem_start(i) = mem_start(i)-1   ! HDF5 uses zero-based indexing.
+                ELSE
+                    self%dims_mem(i)  = self%count(i)    ! If variable passed to the append subroutine has same size as that of the file hyperslab's size (self%count).
+                    self%mem_start(i) = 0                ! Default value is 0. HDF5 uses zero-based indexing.
+                END IF
             END DO
             self%dims_total = self%dims_current
+            
 
             ! Creating ids 
             restart_if: IF(restart/=1) THEN ! for restart not 1
@@ -304,11 +317,19 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             END IF restart_if
 
             ! Creating memory space
-            CALL h5screate_simple_f(n_dim, self%dims_mem, self%memspace_id, self%error)
+            CALL h5screate_simple_f(n_dim, self%dims_mem, self%memspace_id, self%error) ! Is used for creating memory hyperslab and writing data
+
+            ! Selecting the memory hyperslab. 
+            ! This is more efficient than passing a sliced data which is often not contiguous in memory (results in creation of temporary variable in fortran). 
+            ! Hence, just pass the entire data array (only address of first element is passed), and h5 can write only the hyperslab from memory to the file hyperslab.
+            CALL h5sselect_hyperslab_f(self%memspace_id, H5S_SELECT_SET_F, self%mem_start, self%mem_count, self%error)
 
             ! Creating dataset transfer mode property list
             CALL h5pcreate_f(H5P_DATASET_XFER_F, self%transfer_plist_id, self%error) ! if dxpl_mpio (next line) is not set: in serial: no effect, in parallel: default is independent mode.
             IF(h5_utility_mpi) CALL h5pset_dxpl_mpio_f(self%transfer_plist_id, H5FD_MPIO_COLLECTIVE_F, self%error) ! for mpi, setting collective data transfer: i/o is coordinated among ranks -> more efficient than independent mode.
+
+            IF(ALLOCATED(slabstart)) DEALLOCATE(slabstart)
+            IF(ALLOCATED(slabend))   DEALLOCATE(slabend)
 
             IF(debug) WRITE(error_unit,*) "mod_h5_utility/create/}"
         END SUBROUTINE create
@@ -579,9 +600,11 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 ! setting the hyperslab parameters (for extendable dimension, other dimensions for hyperslab are defined in subroutine create)
                 self%start(n_dim_full) = self%dims_current(n_dim_full)-1 ! HDF5 uses zero-based indexing
                 
-                ! selecting the hyperslab (each processor rank will call this with their locaal self%start and self%count)
+                ! selecting the file hyperslab (each processor rank will call this with their locaal self%start and self%count)
                 CALL h5sselect_hyperslab_f(self%space_id, H5S_SELECT_SET_F, self%start, self%count, self%error) ! from the given data space, it selects a given region.
                 ! Here, extent of hyperslab (based on count) is for eg. (nx,ny,nz,1) (i.e., a window).
+
+                ! Memory hyperslab is already set in subroutine create.
 
                 IF(extension_track==self%n_extend) extension_exhausted = .TRUE.
             END ASSOCIATE
@@ -754,6 +777,8 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             IF(ALLOCATED(self%start))           DEALLOCATE(self%start)
             IF(ALLOCATED(self%count))           DEALLOCATE(self%count)
             IF(ALLOCATED(self%dims_mem))        DEALLOCATE(self%dims_mem)
+            IF(ALLOCATED(self%mem_start))       DEALLOCATE(self%mem_start)
+            IF(ALLOCATED(self%mem_count))       DEALLOCATE(self%mem_count)
             IF(ALLOCATED(self%file_name))       DEALLOCATE(self%file_name)
             IF(ASSOCIATED(opened_file_objects)) DEALLOCATE(opened_file_objects)
             
