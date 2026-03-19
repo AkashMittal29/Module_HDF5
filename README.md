@@ -1,4 +1,4 @@
-# Module_HDF5
+# Fortran Wrapper for HDF5
 This is a Fortran wrapper for writing data into .h5 file, which is particularly created for CFD.
 The module is created in a modular format with a derived type *h5_dataset_type*, dedicated to open h5 files, define datasets, data spaces, hyperslabs, managing its own objects, and closing all h5 resources at the end. This wrapper is helpful in simplifying and reducing the write commands in the main file, however, the logic for defining the hyperslabs for file as well as memory is user dependent. 
 
