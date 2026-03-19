@@ -39,3 +39,9 @@ This is an example Matlab file to read .h5 file data.
 1. Object with *h5_dataset_type* type can have multiple datasets under a common **file, file space & hyperslab, memory space & hyperslab, group, and plist (property list)**. Another object will be required if a dataset uses another file data space or memory space (input variable's size and its hyperslab). 
 2. File_id is automatically copied if it is created under the same file to avoid opening multiple file handles.
 3. With two different MPI communicators (having different set of ranks), the same file can not be opened.
+
+## Example of HDF5 hierarchy
+The following graph is based on the example under main_file_parallel_04/.
+<p align="center">
+  <img src="Images/h5_hierarchy.png" width="700">
+</p>
