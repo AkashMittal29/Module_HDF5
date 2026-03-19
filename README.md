@@ -46,7 +46,7 @@ The following graph is based on the example under main_file_parallel_04/.
   <img src="Images/h5_hierarchy.png" width="700">
 </p>
 
-The following figure explains the terms used in HDF5, such as file data-space, memory-space, file-hyperslab, and memory-hyperslab. The data-spaces only contain the meta-data such as size of the array, data-type, and the information of the associated hyperslab. Hyperslab is defined by the start index and the count in each direction. In the following illustration, each box represents an element of an array.
+The following figure explains the terms used in HDF5, such as file data-space, memory-space, file-hyperslab, and memory-hyperslab. The data-spaces only contain the meta-data such as size of the array, data-type, and the information of the associated hyperslab. Hyperslab is defined by the start index and the count in each direction. In the following illustration, each of the smallest boxes represents an element of an array.
 <p align="center">
   <img src="Images/Schematic_HDF5_concept.png" width="900">
 </p>
