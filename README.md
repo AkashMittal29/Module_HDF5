@@ -46,3 +46,8 @@ The following graph is based on the example under main_file_parallel_04/.
   <img src="Images/h5_hierarchy.png" width="700">
 </p>
 
+The following figure explains the terms used in HDF5, such as file data-space, memory-space, file-hyperslab, and memory-hyperslab.
+<p align="center">
+  <img src="Images/Schematic_HDF5_concept.png" width="900">
+</p>
+
