@@ -22,5 +22,14 @@ This is an example Matlab file to read .h5 file data.
 1. Copy mod_h5_utility.F90 to a directory, say test_dir/.
 2. Copy any main.F90 and corresponding job_submit_parallel.sh files to test_dir/.
 3. Copy makefile to the same directory.
-4. In cluster, first load modules as described in the makefile. For example,
-   dfvds
+4. In cluster, first load modules as described in the makefile. For example,\
+   module load gnu openmpi
+5. If particular versions of the modules are used while compiling, update the modules in job_submit_parallel.sh.
+6. To compile, type: make
+7. To clean directory, type: make clean
+8. To submit job through SLURM, type: sbatch \<name of the executable\>.
+
+## Output files
+**.h5 files**  : As defined in the main.F90 files.
+
+**.txt files** : output and error files as defined in job_submit_parallel.sh.
