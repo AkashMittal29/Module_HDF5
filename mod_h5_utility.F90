@@ -226,7 +226,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                     self%mem_start(i) = mem_start(i)-1   ! HDF5 uses zero-based indexing.
                     mem_stride(i)     = 1
                     mem_block(i)      = 1
-                    self%mem_count(i) = self%count(i) ! Should be equal to self%count(i) element-wise.
+                    self%mem_count(i) = self%count(i)    ! Should be equal to self%count(i) element-wise.
                 ELSE
                     self%dims_mem(i)  = self%count(i)    ! If variable passed to the append subroutine has same size as that of the file hyperslab's size (self%count).
                     self%mem_start(i) = 0                ! Default value is 0. HDF5 uses zero-based indexing.
