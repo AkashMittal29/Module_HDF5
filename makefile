@@ -18,7 +18,7 @@
 
 # FOR PARALLEL I/O
 COMPILER=h5pfc
-OPTIONS=-DDEBUGhdf5 -fcheck=all -Wall -Wextra -Wmaybe-uninitialized -g
+OPTIONS=  #-DDEBUGhdf5 -fcheck=all -Wall -Wextra -Wmaybe-uninitialized -g
 # -DDEBUGhdf5 is used for defining preprocessor directive by the name DEBUGhdf5 in mod_h5_utility.F90.
 
 ## one can execute: h5pfc -show :to see the wrapper options
