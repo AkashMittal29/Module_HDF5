@@ -218,21 +218,21 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 ! (Note: for each processor, every local object in a processor is disctinct from the object created in other processor.)
                 self%dims_current(i)  = global_array_size(i)
                 self%dims_max(i)      = global_array_size(i)
-                self%start(i)         = slabstart(i)-1      ! Used for file hyperslab; HDF5 uses zero-based indexing. start(n_dim+1) will be assigned later.
+                self%start(i)         = slabstart(i)-1       ! Used for file hyperslab; HDF5 uses zero-based indexing. start(n_dim+1) will be assigned later.
                 self%count(i)         = slabend(i)-slabstart(i)+1
                 self%dims_chunk(i)    = global_array_size(i) ! chunk should have the dimension of the global array size, however the extendible dimension may vary. 
                 IF(PRESENT(mem_size) .AND. PRESENT(mem_start)) THEN
-                    self%dims_mem(i)  = mem_size(i)      ! memory space is used to write dataset with a memory hyperslab.
-                    self%mem_start(i) = mem_start(i)-1   ! HDF5 uses zero-based indexing.
+                    self%dims_mem(i)  = mem_size(i)          ! memory space is used to write dataset with a memory hyperslab.
+                    self%mem_start(i) = mem_start(i)-1       ! HDF5 uses zero-based indexing.
                     mem_stride(i)     = 1
                     mem_block(i)      = 1
-                    self%mem_count(i) = self%count(i)    ! Should be equal to self%count(i) element-wise.
+                    self%mem_count(i) = self%count(i)        ! Should be equal to self%count(i) element-wise.
                 ELSE
-                    self%dims_mem(i)  = self%count(i)    ! If variable passed to the append subroutine has same size as that of the file hyperslab's size (self%count).
-                    self%mem_start(i) = 0                ! Default value is 0. HDF5 uses zero-based indexing.
-                    mem_stride(i)     = 1                ! Default memory stride (for contgouous memory, such as for the entire array in the memory).
-                    mem_block(i)      = 1                ! Default is 1. Block -> How many jumps for the next element in the memory.
-                    self%mem_count(i) = self%count(i)    ! Should be equal to self%count(i) element-wise.
+                    self%dims_mem(i)  = self%count(i)        ! If variable passed to the append subroutine has same size as that of the file hyperslab's size (self%count).
+                    self%mem_start(i) = 0                    ! Default value is 0. HDF5 uses zero-based indexing.
+                    mem_stride(i)     = 1                    ! Default memory stride (for contgouous memory, such as for the entire array in the memory).
+                    mem_block(i)      = 1                    ! Default is 1. Block -> How many jumps for the next element in the memory.
+                    self%mem_count(i) = self%count(i)        ! Should be equal to self%count(i) element-wise.
                 END IF
                 
             END DO
