@@ -1,5 +1,6 @@
 # Module_HDF5
 This is a Fortran wrapper for writing data into .h5 file, which is particularly created for CFD.
+The module is created in a modular format with a derived type *h5_dataset_type*, dedicated to open h5 files, define datasets, data spaces, hyperslabs, managing its own objects, and closing all h5 resources at the end. This wrapper is helpful in simplifying and reducing the write commands in the main file, however, the logic for defining the hyperslabs for file as well as memory is user dependent. 
 
 ## Description of the files
 **mod_h5_utility.F90**\
@@ -33,3 +34,8 @@ This is an example Matlab file to read .h5 file data.
 **.h5 files**  : As defined in the main.F90 files.
 
 **.txt files** : output and error files as defined in job_submit_parallel.sh.
+
+## Points to take care
+1. Object with *h5_dataset_type* type can have many datasets under a common **file, file space & hyperslab, memory space & hyperslab, group, and plist**. Another object will be required if a dataset uses another file data space or memory space (input variable's size and its hyperslab). 
+2. File_id is automatically copied if it is created under the same file to avoid opening multiple file handles.
+3. With two different MPI communicators (having different set of ranks), the same file can not be opened.
