@@ -36,6 +36,6 @@ This is an example Matlab file to read .h5 file data.
 **.txt files** : output and error files as defined in job_submit_parallel.sh.
 
 ## Points to take care
-1. Object with *h5_dataset_type* type can have many datasets under a common **file, file space & hyperslab, memory space & hyperslab, group, and plist**. Another object will be required if a dataset uses another file data space or memory space (input variable's size and its hyperslab). 
+1. Object with *h5_dataset_type* type can have multiple datasets under a common **file, file space & hyperslab, memory space & hyperslab, group, and plist (property list)**. Another object will be required if a dataset uses another file data space or memory space (input variable's size and its hyperslab). 
 2. File_id is automatically copied if it is created under the same file to avoid opening multiple file handles.
 3. With two different MPI communicators (having different set of ranks), the same file can not be opened.
