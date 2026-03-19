@@ -2,7 +2,7 @@
 ! MODULE mod_h5_utility
 ! A Fortran wrapper for writing hdf5 files.
 ! By Akash Kumar Mittal
-! Feb 2026
+! Mar 2026
 ! Mechanical and Aerospace Engineering
 ! Florida State University, USA
 !###########################################################
@@ -24,7 +24,6 @@ MODULE mod_h5_utility
     !###########################################################
     ! Public interface
     PUBLIC :: h5_dataset_type
-    PUBLIC :: debug
     PUBLIC :: h5_utility_set_datatype
     PUBLIC :: hdf5_initialized
     PUBLIC :: flag_datatype_set
@@ -34,16 +33,17 @@ MODULE mod_h5_utility
     !###########################################################
     ! Declaring module variables
     CHARACTER(LEN=20) :: h5_utility_real, h5_utility_int
-    LOGICAL :: debug, flag_datatype_set = .FALSE.
+    LOGICAL :: flag_datatype_set = .FALSE.
     LOGICAL :: hdf5_initialized = .FALSE.
     logical :: h5_utility_mpi = .FALSE.
     INTEGER :: count_files = 0, n_h5_dataset_type_objects=0
     
     !###########################################################
     ! Defining derived datatype
-    ! Object with this type can have many datasets under a common file, file space, memory space, group, and plist.
+    ! Object with this type can have many datasets under a common: file, file space & hyperslab, memory space & hyperslab, group, and plist.
     ! Another object will be required if a dataset uses another file data space or memory space (input variable's size and its hyperslab). 
     ! However, file_id is automatically copied if it is created under the same file to avoid opening multiple file handles.
+    ! With two different communicators (having different set of ranks), same file can not be opened.
     TYPE h5_dataset_type
         !###########################################################
         ! Declaring variables
@@ -100,7 +100,7 @@ MODULE mod_h5_utility
         SUBROUTINE create(self, global_array_size, data_address, dataset_names, &
                         & restart, restart_step_value, restart_step_data_address, restart_ind, &
                         & data_type, slab_start_ind, slab_end_ind, mpi_comm, mem_size, mem_start)
-            CLASS(h5_dataset_type), INTENT(INOUT)            :: self
+            CLASS(h5_dataset_type), INTENT(INOUT), TARGET        :: self
             INTEGER(kind=HSIZE_T),  INTENT(IN), DIMENSION(:) :: global_array_size ! kind=HSIZE_T (INT64) to accommodate large integers for global_array_size
             CHARACTER(LEN=*),       INTENT(IN)               :: data_address
             CHARACTER(LEN=*),       INTENT(IN), DIMENSION(:) :: dataset_names ! the LEN of each string will be that of the longest string. Therefore use TRIM(ADJUSTL()).
@@ -116,10 +116,10 @@ MODULE mod_h5_utility
             
             CHARACTER(LEN=:), DIMENSION(:), ALLOCATABLE :: address_parts
             INTEGER,          DIMENSION(:), ALLOCATABLE :: slabstart, slabend
+            INTEGER(KIND=8),  DIMENSION(:), ALLOCATABLE :: mem_stride, mem_block
             INTEGER             :: n_dim, i
             INTEGER(kind=hid_t) :: temp_id
             INTEGER(KIND=8)     :: rest_index
-            INTEGER(SIZE_T)     :: int_size = 8
 
 #ifdef DEBUGhdf5
 WRITE(error_unit,*) "mod_h5_utility/create/{"
@@ -194,6 +194,8 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                                 & self%dims_mem(n_dim),       &
                                 & self%mem_start(n_dim),      &
                                 & self%mem_count(n_dim),      &
+                                & mem_stride(n_dim),          &
+                                & mem_block(n_dim),           &
                                 & slabstart(n_dim),           &
                                 & slabend(n_dim)              & 
                                 & ) ! +1 for iteration
@@ -204,12 +206,12 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             ! WRITE(*,*) " large value: ",self%dims_max(n_dim+1), " ", HUGE(0_HSIZE_T) !***
             self%dims_chunk(n_dim+1)   = 1 ! chunk's last dim. chunk size is only required during creation of dataset.
             self%count(n_dim+1)        = 1 ! Used for hyperslab. One time step data is written in an iteration.
-            IF(.NOT. (PRESENT(slab_start_ind) .AND. PRESENT(slab_end_ind)) ) THEN
-                slabstart = 1         ! all elements in slabstart are assumed 1
-                slabend   = global_array_size 
-            ELSE
+            IF( PRESENT(slab_start_ind) .AND. PRESENT(slab_end_ind) ) THEN
                 slabstart = slab_start_ind
                 slabend   = slab_end_ind
+            ELSE
+                slabstart = 1         ! all elements in slabstart are assumed 1
+                slabend   = global_array_size 
             END IF
             
             DO i=1,n_dim
@@ -218,15 +220,21 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 self%dims_max(i)      = global_array_size(i)
                 self%start(i)         = slabstart(i)-1      ! Used for file hyperslab; HDF5 uses zero-based indexing. start(n_dim+1) will be assigned later.
                 self%count(i)         = slabend(i)-slabstart(i)+1
-                self%dims_chunk(i)    = self%count(i)
-                self%mem_count(i)     = self%count(i) ! Should be equal to self%count(i) element-wise.
+                self%dims_chunk(i)    = global_array_size(i) ! chunk should have the dimension of the global array size, however the extendible dimension may vary. 
                 IF(PRESENT(mem_size) .AND. PRESENT(mem_start)) THEN
                     self%dims_mem(i)  = mem_size(i)      ! memory space is used to write dataset with a memory hyperslab.
                     self%mem_start(i) = mem_start(i)-1   ! HDF5 uses zero-based indexing.
+                    mem_stride(i)     = 1
+                    mem_block(i)      = 1
+                    self%mem_count(i) = self%count(i) ! Should be equal to self%count(i) element-wise.
                 ELSE
                     self%dims_mem(i)  = self%count(i)    ! If variable passed to the append subroutine has same size as that of the file hyperslab's size (self%count).
                     self%mem_start(i) = 0                ! Default value is 0. HDF5 uses zero-based indexing.
+                    mem_stride(i)     = 1                ! Default memory stride (for contgouous memory, such as for the entire array in the memory).
+                    mem_block(i)      = 1                ! Default is 1. Block -> How many jumps for the next element in the memory.
+                    self%mem_count(i) = self%count(i)    ! Should be equal to self%count(i) element-wise.
                 END IF
+                
             END DO
             self%dims_total = self%dims_current
             
@@ -309,7 +317,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 END IF
 
                 self%rest_index = rest_index ! Required, so that other bjects of type h5_dataset_type can copy it.
-                self%n_extend = self%dims_total(self%n_dim_full)-rest_index+1 ! Including the rest_index, therefore +1.
+                self%n_extend = self%dims_total(self%n_dim_full)-rest_index+1_INT64 ! Including the rest_index, therefore +1.
                 self%extension_exhausted = .FALSE.
                 self%dims_current(self%n_dim_full) = rest_index-1 ! From rest_index the data is to be written.
                 self%extension_track = 0
@@ -322,16 +330,23 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             ! Selecting the memory hyperslab. 
             ! This is more efficient than passing a sliced data which is often not contiguous in memory (results in creation of temporary variable in fortran). 
             ! Hence, just pass the entire data array (only address of first element is passed), and h5 can write only the hyperslab from memory to the file hyperslab.
-            CALL h5sselect_hyperslab_f(self%memspace_id, H5S_SELECT_SET_F, self%mem_start, self%mem_count, self%error)
+            CALL h5sselect_hyperslab_f(self%memspace_id, H5S_SELECT_SET_F, self%mem_start, self%mem_count, self%error, &
+                                     & stride=mem_stride, block=mem_block)
 
             ! Creating dataset transfer mode property list
             CALL h5pcreate_f(H5P_DATASET_XFER_F, self%transfer_plist_id, self%error) ! if dxpl_mpio (next line) is not set: in serial: no effect, in parallel: default is independent mode.
             IF(h5_utility_mpi) CALL h5pset_dxpl_mpio_f(self%transfer_plist_id, H5FD_MPIO_COLLECTIVE_F, self%error) ! for mpi, setting collective data transfer: i/o is coordinated among ranks -> more efficient than independent mode.
+            !IF(h5_utility_mpi) CALL h5pset_dxpl_mpio_f(self%transfer_plist_id, H5FD_MPIO_INDEPENDENT_F, self%error)
 
-            IF(ALLOCATED(slabstart)) DEALLOCATE(slabstart)
-            IF(ALLOCATED(slabend))   DEALLOCATE(slabend)
+            ! Deallocating local arrays
+            IF(ALLOCATED(slabstart))  DEALLOCATE(slabstart)
+            IF(ALLOCATED(slabend))    DEALLOCATE(slabend)
+            IF(ALLOCATED(mem_stride)) DEALLOCATE(mem_stride)
+            IF(ALLOCATED(mem_block))  DEALLOCATE(mem_block)
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/create/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/create/}"
+#endif
         END SUBROUTINE create
 
         
@@ -341,7 +356,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             INTEGER, INTENT(IN) :: restart
             INTEGER :: index
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/create_file_id/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/create_file_id/{"
+#endif
 
             ! Setting property list for accessing file with parallel I/O
             IF(h5_utility_mpi) THEN
@@ -363,7 +380,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                         WRITE(error_unit,*) "Unable to create file."
                         CALL abort_program()
                     END IF
-                    opened_file_objects(1)%opened_as = 0 ! 0 -> with restart = 0
+                    opened_file_objects(count_files)%opened_as = 0 ! 0 -> with restart = 0
                 ELSE
                     IF(h5_utility_mpi) THEN
                         CALL h5fopen_f(self%file_name, H5F_ACC_RDWR_F, self%file_id, self%error, access_prp=self%plist_id) ! (file_name, File_access_flag, file_id, error)
@@ -374,7 +391,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                         WRITE(error_unit,*) "Unable to open file."
                         CALL abort_program()
                     END IF
-                    opened_file_objects(1)%opened_as = 1 ! 1 -> with restart = 1
+                    opened_file_objects(count_files)%opened_as = 1 ! 1 -> with restart = 1
                 END IF
             ELSE ! Checking if the file is already opened
                 index = is_file_already_opened(self%file_name)
@@ -382,7 +399,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                     self%file_id = opened_file_objects(index)%p%file_id
                     IF((restart==1 .AND. opened_file_objects(index)%opened_as/=1) .OR. &
                      & (restart==0 .AND. opened_file_objects(index)%opened_as/=0)) THEN
-                        WRITE(error_unit,*) "restart value and .h5 file access specifier mismatch." // &
+                        WRITE(error_unit,*) "restart value and .h5 file access specifier mismatch. " // &
                                           & "Check all objects accessing same file have same restart value."
                         CALL abort_program()
                     END IF
@@ -407,7 +424,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                         count_files = count_files+1
                         CALL extend_opened_file_objects()
                         opened_file_objects(count_files)%p => self
-                        opened_file_objects(1)%opened_as = 0
+                        opened_file_objects(count_files)%opened_as = 0
                     ELSE
                         IF(h5_utility_mpi) THEN
                             CALL h5fopen_f(self%file_name, H5F_ACC_RDWR_F, self%file_id, self%error, access_prp=self%plist_id) ! (file_name, File_access_flag, file_id, error)
@@ -421,7 +438,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                         count_files = count_files+1
                         CALL extend_opened_file_objects()
                         opened_file_objects(count_files)%p => self
-                        opened_file_objects(1)%opened_as = 1
+                        opened_file_objects(count_files)%opened_as = 1
                     END IF
                     
                 END IF
@@ -433,7 +450,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 self%plist_id = -1
             END IF
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/create_file_id/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/create_file_id/}"
+#endif
         END SUBROUTINE create_file_id
 
 
@@ -443,7 +462,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             CHARACTER(LEN=*), DIMENSION(:), INTENT(IN) :: dataset_names
             INTEGER :: i
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/create_datasets/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/create_datasets/{"
+#endif
 
             DO i=1,SIZE(self%dataset_id)
                 ! Creating dataset, (group_id/file_id, data_name, type (H5 specific), spce_id, dataset_id, error, property list)
@@ -462,7 +483,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                     CASE('H5T_STD_I64LE')      
                         CALL h5dcreate_f(self%group_id, TRIM(ADJUSTL(dataset_names(i))), H5T_STD_I64LE, self%space_id, &
                                     & self%dataset_id(i), self%error, self%plist_id) 
-                    CASE('H5T_NATIVE_REAL')    
+                    CASE('H5T_NATIVE_REAL')   
                         CALL h5dcreate_f(self%group_id, TRIM(ADJUSTL(dataset_names(i))), H5T_NATIVE_REAL, self%space_id, &
                                     & self%dataset_id(i), self%error, self%plist_id) 
                     CASE('H5T_NATIVE_DOUBLE')  
@@ -481,7 +502,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 END SELECT
             END DO
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/create_datasets/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/create_datasets/}"
+#endif
         END SUBROUTINE create_datasets
 
 
@@ -499,7 +522,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             INTEGER          :: class_id, i
             ! restart_step_values should have (1,nt) dimension in the file with INTEGER of size 8 bytes (INT64).
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/get_rest_index/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/get_rest_index/}"
+#endif
 
             ! Initialilizing index to -1
             index = -1
@@ -552,7 +577,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             CALL h5sclose_f(space_id, self%error)
             CALL h5dclose_f(data_id, self%error)
             
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/get_rest_index/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/get_rest_index/}"
+#endif
         END FUNCTION get_rest_index
 
 
@@ -566,7 +593,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             ! n_extend is assigned to self%n_extend only if extension_exhausted is true.
             INTEGER :: i, mpierror
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/prepare_next_append/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/prepare_next_append/{"
+#endif
 
             ASSOCIATE(n_dim_full => self%n_dim_full, extension_exhausted => self%extension_exhausted, &
                     & extension_track => self%extension_track)
@@ -580,6 +609,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                         IF(h5_utility_mpi) CALL MPI_BARRIER(self%mpi_comm, mpierror)
                         CALL h5dset_extent_f(self%dataset_id(i), self%dims_total, self%error)
                     END DO
+                    
                     IF(h5_utility_mpi) CALL MPI_BARRIER(self%mpi_comm, mpierror)
                     extension_exhausted = .FALSE.
                     extension_track = 0
@@ -609,7 +639,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 IF(extension_track==self%n_extend) extension_exhausted = .TRUE.
             END ASSOCIATE
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/prepare_next_append/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/prepare_next_append/}"
+#endif
         END SUBROUTINE prepare_next_append
 
 
@@ -619,7 +651,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             REAL(kind=8), DIMENSION(:), INTENT(IN) :: array
             INTEGER :: data_index
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real64_1d/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real64_1d/{"
+#endif
 
             CALL h5dwrite_f(self%dataset_id(data_index), H5T_NATIVE_DOUBLE, array, self%dims_mem, &
                           & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
@@ -629,7 +663,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             !                        with hyperslab: start:(0,0,0,nt), count:(nx,ny,nz,1)
             !   memspace extent of the array: (nx,ny,nz) 
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real64_1d/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real64_1d/}"
+#endif
         END SUBROUTINE append_real64_1d
 
 
@@ -639,17 +675,16 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             REAL(kind=4), DIMENSION(:), INTENT(IN) :: array
             INTEGER :: data_index
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real32_1d/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real32_1d/{"
+#endif
 
             CALL h5dwrite_f(self%dataset_id(data_index), H5T_NATIVE_REAL, array, self%dims_mem, &
                           & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
-            ! For eg.: 
-            !   current dataset extent: (nx,ny,nz,nt)
-            !   space extent (file space extent): (nx,ny,nz,nt) : should be same as the current dataset extent
-            !                        with hyperslab: start:(0,0,0,nt), count:(nx,ny,nz,1)
-            !   memspace extent of the array: (nx,ny,nz) 
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real32_1d/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real32_1d/}"
+#endif
         END SUBROUTINE append_real32_1d
 
 
@@ -657,14 +692,18 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
         SUBROUTINE append_real64_2d(self, array, data_index)
             CLASS(h5_dataset_type), INTENT(INOUT) :: self
             REAL(kind=8), DIMENSION(:,:), INTENT(IN) :: array
-            INTEGER :: data_index, n_dim
+            INTEGER :: data_index
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real64_2d/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real64_2d/{"
+#endif
 
             CALL h5dwrite_f(self%dataset_id(data_index), H5T_NATIVE_DOUBLE, array, self%dims_mem, &
-                          & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
+                         & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real64_2d/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real64_2d/}"
+#endif
         END SUBROUTINE append_real64_2d
 
 
@@ -672,14 +711,18 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
         SUBROUTINE append_real32_2d(self, array, data_index)
             CLASS(h5_dataset_type), INTENT(INOUT) :: self
             REAL(kind=4), DIMENSION(:,:), INTENT(IN) :: array
-            INTEGER :: data_index, n_dim
+            INTEGER :: data_index
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real32_2d/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real32_2d/{"
+#endif
 
             CALL h5dwrite_f(self%dataset_id(data_index), H5T_NATIVE_REAL, array, self%dims_mem, &
                           & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_real32_2d/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_real32_2d/}"
+#endif
         END SUBROUTINE append_real32_2d
 
 
@@ -689,12 +732,16 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             INTEGER(kind=8), DIMENSION(:), INTENT(IN) :: array
             INTEGER :: data_index
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_int_1d/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_int_1d/{"
+#endif
 
             CALL h5dwrite_f(self%dataset_id(data_index), H5T_STD_I64LE, array, self%dims_mem, &
                           & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/append_int_1d/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_int_1d/}"
+#endif
         END SUBROUTINE append_int_1d
 
 
@@ -705,7 +752,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             INTEGER :: i, mpierr
             INTEGER(KIND=8) :: n_objects_open
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/destructor/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/destructor/{"
+#endif
 
             ! decrementing object counter
             IF(self%is_destroyed .EQV. .FALSE.) THEN
@@ -790,7 +839,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 WRITE(error_unit, *) 'Successful final close of HDF5.'
             END IF
             
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/destructor/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/destructor/}"
+#endif
         END SUBROUTINE destructor
 
 
@@ -800,9 +851,10 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
         !###########################################################
         SUBROUTINE h5_utility_set_datatype(text_int, text_real)
             CHARACTER(LEN=*), INTENT(IN) :: text_int, text_real
-            INTEGER :: error
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/h5_utility_set_datatype{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/h5_utility_set_datatype{"
+#endif
 
             SELECT CASE (text_int)
                 CASE('H5T_NATIVE_INTEGER') 
@@ -839,7 +891,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             ! The options can be extended referring the following link for FORTRAN90 API datatypes: 
             ! https://davis.lbl.gov/Manuals/HDF5-1.6.1/PredefDTypes.html
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/h5_utility_set_datatype}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/h5_utility_set_datatype}"
+#endif
         END SUBROUTINE h5_utility_set_datatype
 
 
@@ -849,7 +903,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             CHARACTER(LEN=:), DIMENSION(:), ALLOCATABLE, INTENT(OUT) :: out_text
             INTEGER :: length, count, i, start, end
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/separate_string/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/separate_string/{"
+#endif
 
             length = LEN_TRIM(text)
             IF(text(length:length)=='/') length = length-1 ! Ignoring trailing '/'.
@@ -860,7 +916,7 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                IF(text(i:i)=='/') count = count+1
             END DO
 
-            ! Allocating out_text with assumed llength 60 characters.
+            ! Allocating out_text with assumed length 60 characters.
             ALLOCATE(CHARACTER(LEN=60) :: out_text(count+1))
 
             ! Separating each string
@@ -872,7 +928,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             END DO
             out_text(i) = text(start:length)
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/separate_string/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/separate_string/}"
+#endif
         END SUBROUTINE separate_string
 
 
@@ -883,14 +941,18 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             INTEGER :: index
             INTEGER :: i
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/is_file_already_opened/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/is_file_already_opened/{"
+#endif
 
             index = 0
             DO i=1,count_files
                 IF(opened_file_objects(i)%p%file_name == file_name) index = i
             END DO  
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/is_file_already_opened/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/is_file_already_opened/}"
+#endif
         END FUNCTION is_file_already_opened
 
 
@@ -899,7 +961,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             TYPE(h5_dataset_type_ptr), POINTER :: temp(:) ! pointer to array of type h5_dataset_type_ptr
             INTEGER :: n, i
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/extend_opened_file_objects/{"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/extend_opened_file_objects/{"
+#endif
 
             n = SIZE(opened_file_objects)
             ALLOCATE(temp(n))
@@ -916,7 +980,9 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
             opened_file_objects(n+1)%p => NULL()
             DEALLOCATE(temp)
 
-            IF(debug) WRITE(error_unit,*) "mod_h5_utility/extend_opened_file_objects/}"
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/extend_opened_file_objects/}"
+#endif
         END SUBROUTINE extend_opened_file_objects
 
 
