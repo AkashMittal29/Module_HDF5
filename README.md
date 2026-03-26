@@ -52,3 +52,9 @@ The following figure explains the terms used in HDF5, such as file data-space, m
   <img src="Images/Schematic_HDF5_concept.png" width="900">
 </p>
 
+The following figure shows the workflow of the wrapper.
+<p align="center">
+  <img src="Images/Flow_Chart.png" width="900">
+</p>
+
+
