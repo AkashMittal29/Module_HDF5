@@ -250,7 +250,7 @@ PROGRAM main
         CALL MPI_ALLREDUCE(npy_box, npy_min, 1, MPI_INTEGER, MPI_MIN, mpi_sub, ierror)
         CALL MPI_ALLREDUCE(npy_box, npy_max, 1, MPI_INTEGER, MPI_MAX, mpi_sub, ierror)
         npx_box = npx_max-npx_min+1 ! Number of processors in x-dir for box
-        npy_box = npy_max-npy_min+1 ! Number of processors in x-dir for box
+        npy_box = npy_max-npy_min+1 ! Number of processors in y-dir for box
 
         CALL MPI_ALLREDUCE(nxl_box, nxg_box, 1, MPI_INTEGER, MPI_SUM, mpi_sub, ierror)
         CALL MPI_ALLREDUCE(nyl_box, nyg_box, 1, MPI_INTEGER, MPI_SUM, mpi_sub, ierror)
