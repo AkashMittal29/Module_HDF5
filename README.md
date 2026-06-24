@@ -43,7 +43,8 @@ This is an example Matlab file to read .h5 file data.
 5. In an object of *h5_dataset_type*, multiple datasets can be created by providing their names, such as ['p','T','v'] each of which is identical in shape. Care must be taken in the list of names as some compiler may require the strings in the list with identical length. Hence, write name strings with identical string length, for example:['p','T','v'] or
 ```text
 ['pressure', 'temp    ', 'velocity']
-``` where each string has eight characters (the trailing spaces are truncated in the module). 
+```
+where each string has eight characters (the trailing spaces are truncated in the module). 
 
 ## Example of HDF5 hierarchy
 The following graph is based on the example under main_file_parallel_04/.
