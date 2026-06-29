@@ -74,12 +74,14 @@ MODULE mod_h5_utility
             PROCEDURE, PASS(self), PUBLIC  :: append_real64_3d
             PROCEDURE, PASS(self), PUBLIC  :: append_real32_3d
             PROCEDURE, PASS(self), PUBLIC  :: append_int_1d
+            PROCEDURE, PASS(self), PUBLIC  :: append_int_2d
+            PROCEDURE, PASS(self), PUBLIC  :: append_int_3d
             PROCEDURE, PASS(self), PUBLIC  :: destructor
             
             GENERIC :: append => append_real64_1d, append_real32_1d, &
                                & append_real64_2d, append_real32_2d, &
                                & append_real64_3d, append_real32_3d, &
-                               & append_int_1d ! Procedure overloading
+                               & append_int_1d, append_int_2d, append_int_3d ! Procedure overloading
     END TYPE h5_dataset_type
 
     !###########################################################
@@ -106,7 +108,7 @@ MODULE mod_h5_utility
             CLASS(h5_dataset_type), INTENT(INOUT), TARGET        :: self
             INTEGER(kind=HSIZE_T),  INTENT(IN), DIMENSION(:) :: global_array_size ! kind=HSIZE_T (INT64) to accommodate large integers for global_array_size
             CHARACTER(LEN=*),       INTENT(IN)               :: data_address
-            CHARACTER(LEN=*),       INTENT(IN), DIMENSION(:) :: dataset_names ! the LEN of each string will be that of the longest string. Therefore use TRIM(ADJUSTL()).
+            CHARACTER(LEN=*),       INTENT(IN), DIMENSION(:) :: dataset_names ! n some compilers, we need to manually pad to have equal string length or in some the LEN of each string will be that of the longest string. Therefore use TRIM(ADJUSTL()). 
             INTEGER,                INTENT(IN)               :: restart
             INTEGER(KIND=8),        INTENT(IN), OPTIONAL     :: restart_step_value ! must be int64
             CHARACTER(LEN=*),       INTENT(IN), OPTIONAL     :: restart_step_data_address
@@ -123,6 +125,7 @@ MODULE mod_h5_utility
             INTEGER             :: n_dim, i
             INTEGER(kind=hid_t) :: temp_id
             INTEGER(KIND=8)     :: rest_index
+            LOGICAL             :: group_exists=.FALSE.
 
 #ifdef DEBUGhdf5
 WRITE(error_unit,*) "mod_h5_utility/create/{"
@@ -329,9 +332,18 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                     CALL abort_program()
                 END IF
 
+                ! Note: If the restart step value == the step value in the data, the data is written from this step value. 
+                !       Therefore, the data must be rewritten before entering to the iteration loop in such cases. This can generally
+                !       be achieved by checking the MOD(<restart step value>, <save frequency>)==0. If it is true, then there exists the 
+                !       same step value in the data where the data needs to be rewritten. If it is false, then the data shall be written
+                !       from the subsequent iteration.
                 self%rest_index = rest_index ! Required, so that other bjects of type h5_dataset_type can copy it.
                 self%n_extend = self%dims_total(self%n_dim_full)-rest_index+1_INT64 ! Including the rest_index, therefore +1.
-                self%extension_exhausted = .FALSE.
+                IF(self%n_extend==0) THEN
+                    self%extension_exhausted = .TRUE.
+                ELSE    
+                    self%extension_exhausted = .FALSE.
+                END IF
                 self%dims_current(self%n_dim_full) = rest_index-1 ! From rest_index the data is to be written.
                 self%extension_track = 0
 
@@ -571,13 +583,23 @@ WRITE(error_unit,*) "mod_h5_utility/get_rest_index/}"
             ! Type conversion happenss if the file storage, memory types, and Fortran variable types are compatible types.
             ! H5T_NATIVE_INTEGER is not the safest choice since machine can be 32-bit.
 
-            ! Searching required value
-            DO i=1,SIZE(step_values)
-                IF(step_values(i)==restart_step_value) THEN
-                    index = i
-                    EXIT
-                END IF
-            END DO
+            ! Searching the required value
+            IF(step_values(MAXLOC(step_values, DIM=1))<restart_step_value) THEN
+                    index = MAXLOC(step_values, DIM=1)+1
+                    WRITE(*,*) 'mod_h5_utility/create/get_rest_index/: (info) restart_step_value > ' // &
+                             & 'largest step value stored in the data. ' // &
+                             & 'The data will be appended after the last stored step.' 
+            ELSE
+                DO i=1,SIZE(step_values)
+                    IF(step_values(i)==restart_step_value) THEN
+                        index = i ! Returns the index where the restart is desired. Therefore, the data must be rewritten before entering to the next iteration.
+                        EXIT
+                    ELSE IF(step_values(i)>restart_step_value) THEN
+                        index = i
+                        EXIT
+                    END IF
+                END DO
+            END IF
             IF(index==-1) THEN
                 WRITE(error_unit,*) 'mod_h5_utility/create/get_rest_index/: unable to find ' // &
                                   & 'the restart_step_value in the provided dataset address.'
@@ -599,7 +621,7 @@ WRITE(error_unit,*) "mod_h5_utility/get_rest_index/}"
         !###########################################################
         SUBROUTINE prepare_next_append(self, n_extend)
             ! If no extension is required for a data where overwriting is desired every step, 
-            ! call this subroutine once after calling create with restart = 0.
+            ! call this subroutine only once after calling create with restart = 0.
             ! If data is extendable, then call this subroutine before appending every step. 
             CLASS(h5_dataset_type), INTENT(INOUT) :: self
             INTEGER, INTENT(IN) :: n_extend ! No. of extension elements in extendable dimension.
@@ -794,6 +816,44 @@ WRITE(error_unit,*) "mod_h5_utility/append_int_1d/{"
 WRITE(error_unit,*) "mod_h5_utility/append_int_1d/}"
 #endif
         END SUBROUTINE append_int_1d
+
+
+        !###########################################################
+        SUBROUTINE append_int_2d(self, array, data_index)
+            CLASS(h5_dataset_type), INTENT(INOUT) :: self
+            INTEGER(kind=8), DIMENSION(:,:), INTENT(IN) :: array
+            INTEGER :: data_index
+
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_int_2d/{"
+#endif
+
+            CALL h5dwrite_f(self%dataset_id(data_index), H5T_STD_I64LE, array, self%dims_mem, &
+                          & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
+
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_int_2d/}"
+#endif
+        END SUBROUTINE append_int_2d
+
+
+        !###########################################################
+        SUBROUTINE append_int_3d(self, array, data_index)
+            CLASS(h5_dataset_type), INTENT(INOUT) :: self
+            INTEGER(kind=8), DIMENSION(:,:,:), INTENT(IN) :: array
+            INTEGER :: data_index
+
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_int_3d/{"
+#endif
+
+            CALL h5dwrite_f(self%dataset_id(data_index), H5T_STD_I64LE, array, self%dims_mem, &
+                          & self%error, mem_space_id=self%memspace_id, file_space_id=self%space_id, xfer_prp=self%transfer_plist_id)
+
+#ifdef DEBUGhdf5
+WRITE(error_unit,*) "mod_h5_utility/append_int_3d/}"
+#endif
+        END SUBROUTINE append_int_3d
 
 
         !###########################################################
