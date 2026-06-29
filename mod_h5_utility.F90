@@ -251,10 +251,20 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                 IF(SIZE(address_parts)>1) THEN
                      DO i=2,SIZE(address_parts)
                         IF(i==2) THEN
-                            CALL h5gcreate_f(self%file_id, TRIM(ADJUSTL(address_parts(i))), self%group_id, self%error)
+                            CALL h5lexists_f(self%file_id, TRIM(ADJUSTL(address_parts(i))), group_exists, self%error) ! Checking if the group already exists
+                            IF(group_exists) THEN
+                                CALL h5gopen_f(self%file_id, TRIM(ADJUSTL(address_parts(i))), self%group_id, self%error)
+                            ELSE
+                                CALL h5gcreate_f(self%file_id, TRIM(ADJUSTL(address_parts(i))), self%group_id, self%error)
+                            END IF
                             temp_id = self%group_id
                         ELSE
-                            CALL h5gcreate_f(temp_id, TRIM(ADJUSTL(address_parts(i))), self%group_id, self%error)
+                            CALL h5lexists_f(temp_id, TRIM(ADJUSTL(address_parts(i))), group_exists, self%error) ! Checking if the group already exists
+                            IF(group_exists) THEN
+                                CALL h5gopen_f(temp_id, TRIM(ADJUSTL(address_parts(i))), self%group_id, self%error)
+                            ELSE
+                                CALL h5gcreate_f(temp_id, TRIM(ADJUSTL(address_parts(i))), self%group_id, self%error)
+                            END IF
                             CALL h5gclose_f(temp_id, self%error)
                             temp_id = self%group_id
                         END IF
