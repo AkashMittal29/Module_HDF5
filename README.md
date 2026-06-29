@@ -39,7 +39,7 @@ This is an example Matlab file to read .h5 file data.
 1. Object with *h5_dataset_type* type can have multiple datasets under a common **file, file space & hyperslab, memory space & hyperslab, group, and plist (property list)**. Another object will be required if a dataset uses another file data space or memory space (input variable's size and its hyperslab). 
 2. File_id is automatically copied if it is created under the same file to avoid opening multiple file handles.
 3. With two different MPI communicators (having different set of ranks), the same file can not be opened.
-4. With restart option, restart index is required from where the date is resumed to be written. Note that the data is written exactly from the restart index. Therefore the data corresponding to that iteration has to be written first before proceeding with further computation.
+4. With restart option, restart index is required from where the date is resumed to be written. Note that the data is written exactly from the restart index if the restart index has same iteration value as the restart iteration value. Therefore the data corresponding to that iteration has to be written first before proceeding with further computation in such cases.
 5. In an object of *h5_dataset_type*, multiple datasets can be created by providing a list of names, such as ['p','T','v'], array of each of which is identical in shape. However, care must be taken in the list of names as some compiler may require the strings in the list with identical length. Hence, write name strings with identical string length, for example: ['p','T','v'] or
 ```text
 ['pressure', 'temp    ', 'velocity']
