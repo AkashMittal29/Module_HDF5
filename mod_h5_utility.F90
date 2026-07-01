@@ -29,6 +29,7 @@ MODULE mod_h5_utility
     PUBLIC :: flag_datatype_set
     PUBLIC :: h5_utility_mpi
     PUBLIC :: n_h5_dataset_type_objects
+    PUBLIC :: overwrite_from_restart
 
     !###########################################################
     ! Declaring module variables
@@ -37,6 +38,7 @@ MODULE mod_h5_utility
     LOGICAL :: hdf5_initialized = .FALSE.
     logical :: h5_utility_mpi = .FALSE.
     INTEGER :: count_files = 0, n_h5_dataset_type_objects=0
+    LOGICAL :: overwrite_from_restart = .FALSE.
     
     !###########################################################
     ! Defining derived datatype
@@ -332,11 +334,12 @@ WRITE(error_unit,*) "mod_h5_utility/create/{"
                     CALL abort_program()
                 END IF
 
-                ! Note: If the restart step value == the step value in the data, the data is written from this step value. 
-                !       Therefore, the data must be rewritten before entering to the iteration loop in such cases. This can generally
-                !       be achieved by checking the MOD(<restart step value>, <save frequency>)==0. If it is true, then there exists the 
-                !       same step value in the data where the data needs to be rewritten. If it is false, then the data shall be written
-                !       from the subsequent iteration.
+                ! Note: If the restart step value == the step value in the data, the data is either written from the same index or from 
+                !       the next index depending on overwrite_from_restart value. 
+                !       Therefore, for overwrite_from_restart = True, the data must be rewritten before entering to the iteration loop in 
+                !       such cases. This can generally be achieved by checking the MOD(<restart step value>, <save frequency>)==0. If it is 
+                !       true, then there exists the same step value in the data where the data needs to be rewritten. If it is false, 
+                !       then the data shall be written from the subsequent iteration.
                 self%rest_index = rest_index ! Required, so that other bjects of type h5_dataset_type can copy it.
                 self%n_extend = self%dims_total(self%n_dim_full)-rest_index+1_INT64 ! Including the rest_index, therefore +1.
                 IF(self%n_extend==0) THEN
@@ -592,7 +595,11 @@ WRITE(error_unit,*) "mod_h5_utility/get_rest_index/}"
             ELSE
                 DO i=1,SIZE(step_values)
                     IF(step_values(i)==restart_step_value) THEN
-                        index = i ! Returns the index where the restart is desired. Therefore, the data must be rewritten before entering to the next iteration.
+                        IF(overwrite_from_restart) THEN
+                            index = i ! Returns the index where the restart overwriting is desired. Therefore, the data must be rewritten before entering to the next iteration.
+                        ELSE
+                            index = i+1 ! Returns the next index if overwriting is not desired.
+                        END IF
                         EXIT
                     ELSE IF(step_values(i)>restart_step_value) THEN
                         index = i
