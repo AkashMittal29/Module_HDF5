@@ -54,6 +54,8 @@ PROGRAM main
     CALL h5_utility_set_datatype('H5T_STD_I64LE','H5T_NATIVE_DOUBLE')
     ! Setting parallel I/O capability for mod_h5_utility
     h5_utility_mpi = .TRUE. 
+    ! Setting to rewrite the data at the restart index.
+    overwrite_from_restart = .TRUE.
 
     !###########################################################
     ! Creation of datasets; This should be called once before writing the data.
